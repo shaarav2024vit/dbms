@@ -75,6 +75,36 @@ def get_event_categories(event_id):
             """, (event_id,))
             return cur.fetchall()
 
+def get_category_seat_map(category_id):
+    """
+    Returns category seating details and all currently occupied seats (VALID / USED).
+    Used by the 2D Interactive Visual Seat Map.
+    """
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT sc.category_id, sc.event_id, sc.category_name, sc.price,
+                       sc.total_seats, sc.available_seats,
+                       e.event_name, e.event_date
+                FROM SEAT_CATEGORY sc
+                JOIN EVENT e ON sc.event_id = e.event_id
+                WHERE sc.category_id = %s;
+            """, (category_id,))
+            cat = cur.fetchone()
+            if not cat:
+                return None
+
+            cur.execute("""
+                SELECT seat_number, status
+                FROM TICKET
+                WHERE category_id = %s AND status IN ('VALID', 'USED')
+                ORDER BY seat_number ASC;
+            """, (category_id,))
+            tickets = cur.fetchall()
+            cat["booked_seats"] = [t["seat_number"] for t in tickets]
+            return cat
+
+
 def get_event_details(event_id):
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -414,3 +444,125 @@ def run_query(query_num):
             cur.execute(sql)
             results = cur.fetchall()
             return title, sql.strip(), results
+
+
+def get_event_atlas_data(event_id):
+    """
+    Retrieves the complete relational topology centered on an EVENT anchor:
+    - EVENT (with venue & organizer)
+    - VENUE (physical constraints)
+    - ORGANIZER (user account)
+    - SEAT_CATEGORY (pricing tiers & quotas)
+    - BOOKINGS (customer reservations)
+      - CUSTOMER details
+      - TICKETS issued (linked to SEAT_CATEGORY)
+      - PAYMENTS attempted
+      - CANCELLATION (optional 1:0..1)
+    """
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT e.event_id, e.event_name, e.event_date, e.event_time, e.description, e.created_at,
+                       v.venue_id, v.venue_name, v.location, v.capacity AS venue_capacity,
+                       u.user_id AS organizer_id, u.name AS organizer_name, u.email AS organizer_email, u.phone AS organizer_phone,
+                       fn_event_occupancy(e.event_id) AS occupancy_pct
+                FROM EVENT e
+                JOIN VENUE v ON e.venue_id = v.venue_id
+                JOIN USERS u ON e.organizer_id = u.user_id
+                WHERE e.event_id = %s;
+            """, (event_id,))
+            event_row = cur.fetchone()
+            if not event_row:
+                return None
+
+            event = {
+                "event_id": event_row["event_id"],
+                "event_name": event_row["event_name"],
+                "event_date": event_row["event_date"],
+                "event_time": event_row["event_time"],
+                "description": event_row["description"],
+                "created_at": event_row["created_at"],
+                "occupancy_pct": float(event_row["occupancy_pct"] or 0)
+            }
+
+            venue = {
+                "venue_id": event_row["venue_id"],
+                "venue_name": event_row["venue_name"],
+                "location": event_row["location"],
+                "capacity": event_row["venue_capacity"]
+            }
+
+            organizer = {
+                "user_id": event_row["organizer_id"],
+                "name": event_row["organizer_name"],
+                "email": event_row["organizer_email"],
+                "phone": event_row["organizer_phone"],
+                "role": "ORGANIZER"
+            }
+
+            cur.execute("""
+                SELECT category_id, event_id, category_name, price, total_seats, available_seats,
+                       (total_seats - available_seats) AS booked_count
+                FROM SEAT_CATEGORY
+                WHERE event_id = %s
+                ORDER BY price DESC;
+            """, (event_id,))
+            categories = cur.fetchall()
+
+            cur.execute("""
+                SELECT b.booking_id, b.event_id, b.user_id, b.booking_date, b.total_amount, b.status,
+                       u.name AS customer_name, u.email AS customer_email, u.phone AS customer_phone
+                FROM BOOKING b
+                JOIN USERS u ON b.user_id = u.user_id
+                WHERE b.event_id = %s
+                ORDER BY b.booking_id ASC;
+            """, (event_id,))
+            bookings = cur.fetchall()
+
+            booking_ids = [b["booking_id"] for b in bookings]
+            tickets_by_booking = {}
+            payments_by_booking = {}
+            cancellations_by_booking = {}
+
+            if booking_ids:
+                cur.execute("""
+                    SELECT t.ticket_id, t.booking_id, t.category_id, t.seat_number, t.price, t.status,
+                           sc.category_name
+                    FROM TICKET t
+                    JOIN SEAT_CATEGORY sc ON t.category_id = sc.category_id
+                    WHERE t.booking_id = ANY(%s)
+                    ORDER BY t.ticket_id ASC;
+                """, (booking_ids,))
+                for t in cur.fetchall():
+                    tickets_by_booking.setdefault(t["booking_id"], []).append(t)
+
+                cur.execute("""
+                    SELECT payment_id, booking_id, payment_date, amount_paid, payment_method, status
+                    FROM PAYMENT
+                    WHERE booking_id = ANY(%s)
+                    ORDER BY payment_id ASC;
+                """, (booking_ids,))
+                for p in cur.fetchall():
+                    payments_by_booking.setdefault(p["booking_id"], []).append(p)
+
+                cur.execute("""
+                    SELECT cancel_id, booking_id, cancel_date, reason, refund_amount, status
+                    FROM CANCELLATION
+                    WHERE booking_id = ANY(%s);
+                """, (booking_ids,))
+                for c in cur.fetchall():
+                    cancellations_by_booking[c["booking_id"]] = c
+
+            for b in bookings:
+                bid = b["booking_id"]
+                b["tickets"] = tickets_by_booking.get(bid, [])
+                b["payments"] = payments_by_booking.get(bid, [])
+                b["cancellation"] = cancellations_by_booking.get(bid, None)
+
+            return {
+                "event": event,
+                "venue": venue,
+                "organizer": organizer,
+                "categories": categories,
+                "bookings": bookings
+            }

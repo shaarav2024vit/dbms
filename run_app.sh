@@ -16,11 +16,17 @@ case "$1" in
     cli)
         "$PYTHON" "$DIR/cli_app.py"
         ;;
+    race)
+        "$PYTHON" "$DIR/test_race_condition.py" "${@:2}"
+        ;;
+    benchmark)
+        "$PYTHON" "$DIR/benchmark_indexes.py"
+        ;;
     web|"")
         echo "Starting Web Application on http://localhost:5050 ..."
         "$PYTHON" "$DIR/app/server.py"
         ;;
     *)
-        echo "Usage: ./run_app.sh [web|cli]"
+        echo "Usage: ./run_app.sh [web|cli|race|benchmark]"
         ;;
 esac

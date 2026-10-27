@@ -9,20 +9,26 @@ import json
 from flask import Flask, render_template, request, jsonify
 from db import (
     test_connection, get_overview_stats, get_users_list, get_public_catalog,
-    get_event_categories, get_event_details, get_user_wallet, get_user_bookings,
+    get_event_categories, get_category_seat_map, get_event_details, get_user_wallet, get_user_bookings,
     get_booking_details, book_tickets, make_payment, get_refund_quote,
     cancel_booking, get_organizer_events, add_seat_category,
     run_settle_cancellations, run_expire_stale_bookings,
-    get_customer_spend_report, run_query
+    get_customer_spend_report, run_query, get_event_atlas_data
 )
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
 # Helper for JSON serialization of dates & decimals
 def format_row(row):
+    if not row:
+        return row
     formatted = {}
     for k, v in row.items():
-        if hasattr(v, "isoformat"):
+        if isinstance(v, bool):
+            formatted[k] = v
+        elif isinstance(v, int):
+            formatted[k] = v
+        elif hasattr(v, "isoformat"):
             formatted[k] = v.isoformat()
         elif hasattr(v, "__float__"):
             formatted[k] = float(v)
@@ -84,6 +90,45 @@ def event_detail(event_id):
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/atlas/events/<int:event_id>")
+def atlas_event(event_id):
+    try:
+        data = get_event_atlas_data(event_id)
+        if not data:
+            return jsonify({"success": False, "error": "Event not found"}), 404
+        
+        formatted_data = {
+            "event": format_row(data["event"]),
+            "venue": format_row(data["venue"]),
+            "organizer": format_row(data["organizer"]),
+            "categories": format_rows(data["categories"]),
+            "bookings": []
+        }
+        for b in data["bookings"]:
+            b_copy = format_row(b)
+            b_copy["tickets"] = format_rows(b.get("tickets", []))
+            b_copy["payments"] = format_rows(b.get("payments", []))
+            b_copy["cancellation"] = format_row(b["cancellation"]) if b.get("cancellation") else None
+            formatted_data["bookings"].append(b_copy)
+
+        return jsonify({"success": True, "data": formatted_data})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/categories/<int:category_id>/seats")
+def category_seats(category_id):
+    try:
+        data = get_category_seat_map(category_id)
+        if not data:
+            return jsonify({"success": False, "error": "Category not found"}), 404
+        return jsonify({
+            "success": True,
+            "data": format_row(data)
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route("/api/users/<int:user_id>/tickets")
 def user_tickets(user_id):

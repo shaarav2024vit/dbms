@@ -21,6 +21,8 @@ function show_help() {
     echo "  init        Run schema (DDL), seed data (DML), and PL/pgSQL routines"
     echo "  queries     Execute Review II SQL queries suite"
     echo "  demo        Execute DML demo and 7 Real-World Transactions"
+    echo "  race        Execute 10-thread concurrency & race condition test"
+    echo "  benchmark   Execute EXPLAIN ANALYZE query optimization benchmark"
     echo "  psql        Open interactive psql terminal inside the database"
     echo "  reset       Drop all data, re-apply schema, seed data, and PL/pgSQL"
     echo ""
@@ -34,13 +36,19 @@ case "$1" in
         elif command -v docker-compose >/dev/null 2>&1; then
             docker-compose up -d
         else
-            docker run --name "$CONTAINER_NAME" \
-                -e POSTGRES_USER="$DB_USER" \
-                -e POSTGRES_PASSWORD=postgrespassword \
-                -e POSTGRES_DB="$DB_NAME" \
-                -p 5432:5432 \
-                -v "$(pwd)/database":/docker-entrypoint-initdb.d:ro \
-                -d postgres:16-alpine
+            if docker ps --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}\$"; then
+                echo "Container $CONTAINER_NAME is already running."
+            elif docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}\$"; then
+                docker start "$CONTAINER_NAME"
+            else
+                docker run --name "$CONTAINER_NAME" \
+                    -e POSTGRES_USER="$DB_USER" \
+                    -e POSTGRES_PASSWORD=postgrespassword \
+                    -e POSTGRES_DB="$DB_NAME" \
+                    -p 5432:5432 \
+                    -v "$(pwd)/database":/docker-entrypoint-initdb.d:ro \
+                    -d postgres:16-alpine
+            fi
         fi
         echo "Container started! Waiting for PostgreSQL to be ready..."
         sleep 2
@@ -78,6 +86,22 @@ case "$1" in
         echo ""
         echo "Executing Section 9: 7 Real-World Transactions Demo (07_transactions_demo.sql)..."
         docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -f /docker-entrypoint-initdb.d/demos/07_transactions_demo.sql
+        ;;
+    race)
+        echo "Executing 10-Thread Concurrency & Race Condition Test..."
+        if [ -f "./venv/bin/python3" ]; then
+            ./venv/bin/python3 ./test_race_condition.py
+        else
+            python3 ./test_race_condition.py
+        fi
+        ;;
+    benchmark)
+        echo "Executing Query Optimization & Index Benchmark (05_performance_benchmark.sql)..."
+        docker exec -i "$CONTAINER_NAME" psql -U "$DB_USER" -d "$DB_NAME" -f /docker-entrypoint-initdb.d/05_performance_benchmark.sql
+        if [ -f "./venv/bin/python3" ]; then
+            echo ""
+            ./venv/bin/python3 ./benchmark_indexes.py
+        fi
         ;;
     psql)
         echo "Opening interactive PostgreSQL shell..."

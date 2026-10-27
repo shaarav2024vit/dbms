@@ -51,6 +51,8 @@ def show_menu():
     print("  [9]  Admin: Expire Stale Unpaid Checkouts (Parameterized Cursor: sp_expire_stale_bookings)")
     print("  [10] Admin: Customer Lifetime Spend Analytics (Function: fn_customer_lifetime_spend)")
     print("  [11] Academic Query Suite: Run Queries 1.1 through 5.2")
+    print("  [12] Concurrency Stress Test: 10 Parallel Threads Race for Same Seat (test_race_condition.py)")
+    print("  [13] Query Optimization Benchmark: EXPLAIN ANALYZE & Partial Indexes (benchmark_indexes.py)")
     print("  [0]  Exit")
     print("-" * 75)
 
@@ -253,6 +255,12 @@ def main():
             op_admin_spend()
         elif choice == "11":
             op_run_queries()
+        elif choice == "12":
+            import subprocess
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "test_race_condition.py")])
+        elif choice == "13":
+            import subprocess
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "benchmark_indexes.py")])
         else:
             print("Invalid option. Please try again.")
 

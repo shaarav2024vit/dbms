@@ -46,7 +46,18 @@ db project/
 
 ---
 
-## Quick Start Guide
+## Universal Quick Start (One Command for Any OS)
+
+Works out-of-the-box on **macOS (Apple Silicon & Intel)**, **Arch Linux**, **CachyOS**, **EndeavourOS**, **Ubuntu**, **Debian**, and **Fedora**:
+
+```bash
+./start.sh
+```
+*Automatically sets up Python virtual environment, installs dependencies, starts PostgreSQL (Docker or native), initializes schema & seed data if needed, and opens http://localhost:5050 in your browser.*
+
+---
+
+## Manual Step-by-Step Commands
 
 ### 1. Database Setup
 ```bash
@@ -61,6 +72,12 @@ db project/
 
 # Run DML & Transaction demo scripts
 ./run_db.sh demo
+
+# Run 10-Thread Concurrency & Race Condition Stress Test
+./run_db.sh race   # or ./run_app.sh race
+
+# Run EXPLAIN ANALYZE Query Optimization & Index Benchmark
+./run_db.sh benchmark   # or ./run_app.sh benchmark
 ```
 
 ### 2. Launch the Application
